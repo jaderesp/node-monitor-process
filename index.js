@@ -1,5 +1,40 @@
 import _ from 'lodash'
 import { createServer } from 'node:http'
+import { Session } from 'node:inspector/promises';
+import { writeFile } from 'node:fs/promises';
+
+function cpuProfiling() {
+    let _session;
+    return {
+        async start() {
+            _session = new Session();
+            await _session.connect();
+            await _session.post('Profiler.enable');
+            await _session.post('Profiler.start');
+            console.log('CPU profiling started');
+        },
+        async stop() {
+            console.log('CPU profiling stopped');
+            let profile;
+
+            try {
+                await _session.post('Profiler.stop').then(async (data) => {
+                    profile = data?.profile;
+                    console.log(profile)
+                    if (profile) {
+                        await writeFile(`./cpu_profile_${Date.now()}.cpuprofile`, JSON.stringify(profile));
+                    }
+                    await _session.disconnect();
+                });
+
+            } catch (error) {
+                console.log("Erro ao parar o Profiler:  ", error)
+                // await _session.disconnect();
+            }
+
+        }
+    }
+}
 
 
 const largeDataset = Array.from({ length: 1e4 }, (_, id) => ({
@@ -52,3 +87,19 @@ createServer(
     .once('listening', function onListening() {
         console.log('Server started on http://localhost:3000');
     });
+
+
+const { start, stop } = cpuProfiling();
+
+start();
+
+const exitSignals = ['SIGINT', 'SIGTERM', 'SIGQUIT'];
+
+exitSignals.forEach(function (signal) {
+    process.on(signal, async function () {
+        console.log(`Received ${signal}, stopping server...`);
+        await stop();
+        process.exit(0);
+    });
+});
+
